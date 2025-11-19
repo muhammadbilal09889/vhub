@@ -1,65 +1,67 @@
 // netlify/functions/telegram-webhook.js
-// SUPER SIMPLE TEST WEBHOOK
+// PHASE 1 – /start logic wapas
 
 const fetch = require('node-fetch');
 
+const SUPA_URL = process.env.SUPABASE_URL;
+const SUPA_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const TELE_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELE_TOKEN}`;
 
 async function sendTelegram(chatId, text) {
-  if (!TELE_TOKEN) {
-    console.error('⚠️ TELEGRAM_BOT_TOKEN missing in env');
-    return;
-  }
   try {
     await fetch(`${TELEGRAM_API}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: String(chatId),
-        text,
-        parse_mode: 'HTML'
-      })
+      body: JSON.stringify({ chat_id: String(chatId), text, parse_mode: 'HTML' })
     });
-  } catch (err) {
-    console.error('sendTelegram error:', err);
-  }
+  } catch (e) { console.error('sendTelegram:', e); }
+}
+
+async function supaFetch(path) {
+  const res = await fetch(`${SUPA_URL}${path}`, {
+    headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
+  });
+  return res.json();
 }
 
 exports.handler = async (event) => {
-  // Telegram webhook hamesha POST bhejta hai
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 200, body: 'no action' };
-  }
+  if (event.httpMethod !== 'POST') return { statusCode: 200, body: 'nothing' };
 
   try {
     const body = JSON.parse(event.body || '{}');
-    console.log('TEST WEBHOOK UPDATE:', JSON.stringify(body).slice(0, 1000));
-
     const msg = body.message;
-    if (!msg || !msg.chat) {
-      // koi normal message nahi mila
+
+    if (!msg) return { statusCode: 200, body: 'no message' };
+
+    const chatId = msg.chat?.id;
+    const text = (msg.text || '').trim();
+
+    // Only START handle karna
+    if (text.startsWith('/start')) {
+      const orderId = text.split(' ')[1];
+      if (!orderId) {
+        await sendTelegram(chatId, 'Use: /start <OrderID>');
+        return { statusCode: 200, body: 'ok' };
+      }
+
+      // Payment check
+      const payments = await supaFetch(`/rest/v1/payments?OrderID=eq.${orderId}&select=*`);
+      if (Array.isArray(payments) && payments.length > 0) {
+        await sendTelegram(chatId, `💡 Order <b>${orderId}</b> found. Payment pending approval 🔄`);
+      } else {
+        await sendTelegram(chatId, `⚠️ Order <b>${orderId}</b> not found.`);
+      }
+
       return { statusCode: 200, body: 'ok' };
     }
 
-    const chatId = msg.chat.id;
-    const text = (msg.text || '').trim();
-
-    let reply = 'Test webhook: message received ✅';
-
-    if (text.toLowerCase().startsWith('/start')) {
-      reply = 'Salaam! ✅ Test webhook chal raha hai. Aapka /start mil gaya.';
-    } else if (text.toLowerCase().startsWith('/help')) {
-      reply = 'Ye sirf test version hai. /start bhejoge to sirf test reply aayega 🙂';
-    } else if (text) {
-      reply = `Test reply: "${text}" mil gaya ✅`;
-    }
-
-    await sendTelegram(chatId, reply);
+    // Normal message
+    await sendTelegram(chatId, 'Bot online hai but commands limited hain. Use /start <OrderID>.');
 
     return { statusCode: 200, body: 'ok' };
   } catch (err) {
-    console.error('TEST telegram-webhook error:', err);
+    console.error(err);
     return { statusCode: 500, body: 'error' };
   }
 };
